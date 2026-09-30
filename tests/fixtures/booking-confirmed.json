@@ -1,0 +1,10 @@
+{
+  "dry_run": true,
+  "name": "Pat Owner",
+  "phone": "+15551110000",
+  "service": "consultation",
+  "requested_start": "2026-10-05T10:00:00Z",
+  "duration_min": 30,
+  "existing_bookings": [],
+  "business_hours": {"open": "09:00", "close": "17:00", "tz_offset_min": 0}
+}

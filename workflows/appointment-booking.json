@@ -1,0 +1,197 @@
+{
+  "name": "appointment-booking",
+  "nodes": [
+    {
+      "id": "b63cced6-37f2-4ea9-8ef5-266b51033492",
+      "name": "Booking Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "appointment-booking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "26c91f54-c8b2-4ff4-99ec-86734fd4346c"
+    },
+    {
+      "id": "6b2db9bf-a14b-492e-b8e0-14939befde1e",
+      "name": "Validate & Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json;\nconst body = raw.body !== undefined ? raw.body : raw;\nconst dryRun = body.dry_run === true;\n\nconst problems = [];\n\nif (typeof body.name !== 'string' || !body.name.trim()) problems.push('name is required');\nif (typeof body.phone !== 'string' || !body.phone.trim()) problems.push('phone is required');\nif (typeof body.service !== 'string' || !body.service.trim()) problems.push('service is required');\n\nlet requestedDate;\nif (typeof body.requested_start !== 'string' || isNaN(Date.parse(body.requested_start))) {\n  problems.push('requested_start must be a valid ISO 8601 date-time string');\n} else {\n  requestedDate = new Date(body.requested_start);\n}\n\nif (typeof body.duration_min !== 'number' || !(body.duration_min > 0)) {\n  problems.push('duration_min must be a positive number');\n}\n\nconst bh = body.business_hours;\nif (!bh || typeof bh.open !== 'string' || typeof bh.close !== 'string' || typeof bh.tz_offset_min !== 'number') {\n  problems.push('business_hours with open, close (HH:MM) and tz_offset_min is required');\n}\n\nif (body.existing_bookings !== undefined && !Array.isArray(body.existing_bookings)) {\n  problems.push('existing_bookings must be an array');\n}\n\nif (problems.length) {\n  return [{\n    json: {\n      status: 'invalid',\n      errors: problems,\n      dry_run: dryRun,\n      dispatched: false,\n    },\n  }];\n}\n\nfunction parseHHMM(s) {\n  const [h, m] = s.split(':').map(Number);\n  return h * 60 + m;\n}\nfunction toLocalShifted(date, tz) {\n  return new Date(date.getTime() + tz * 60000);\n}\nfunction fromLocalShifted(date, tz) {\n  return new Date(date.getTime() - tz * 60000);\n}\nfunction localDayOpen(localShifted, openMin) {\n  return new Date(Date.UTC(localShifted.getUTCFullYear(), localShifted.getUTCMonth(), localShifted.getUTCDate(), Math.floor(openMin / 60), openMin % 60, 0));\n}\nfunction localDayClose(localShifted, closeMin) {\n  return new Date(Date.UTC(localShifted.getUTCFullYear(), localShifted.getUTCMonth(), localShifted.getUTCDate(), Math.floor(closeMin / 60), closeMin % 60, 0));\n}\n\nconst tz = bh.tz_offset_min;\nconst openMin = parseHHMM(bh.open);\nconst closeMin = parseHHMM(bh.close);\nconst duration = body.duration_min;\n\nlet bookings = (body.existing_bookings || []).map((b) => ({ ...b, start: new Date(b.start), end: new Date(b.end) }));\nif (body.action === 'reschedule' && body.booking_id) {\n  bookings = bookings.filter((b) => b.id !== body.booking_id);\n}\n\nconst reqStart = requestedDate;\nconst reqEnd = new Date(reqStart.getTime() + duration * 60000);\n\nconst startLocal = toLocalShifted(reqStart, tz);\nconst startLocalMin = startLocal.getUTCHours() * 60 + startLocal.getUTCMinutes();\nconst endLocalMin = startLocalMin + duration;\nconst withinHours = startLocalMin >= openMin && endLocalMin <= closeMin;\n\nconst overlaps = bookings.some((b) => reqStart < b.end && reqEnd > b.start);\nconst conflict = !withinHours || overlaps;\n\nif (!conflict) {\n  const confirmation_text = `Booked ${body.service} for ${body.name} on ${reqStart.toISOString()} (${duration} min).`;\n  return [{\n    json: {\n      status: 'confirmed',\n      slot: { start: reqStart.toISOString(), end: reqEnd.toISOString() },\n      confirmation_text,\n      dry_run: dryRun,\n      dispatched: false,\n    },\n  }];\n}\n\n// Build up to 3 alternative slots in 30-minute steps, same or next business day.\nlet candidateLocal = toLocalShifted(reqStart, tz);\nconst totalMin = candidateLocal.getUTCHours() * 60 + candidateLocal.getUTCMinutes();\nconst remainder = totalMin % 30;\nif (remainder !== 0 || candidateLocal.getUTCSeconds() > 0) {\n  candidateLocal = new Date(candidateLocal.getTime() + (30 - remainder) * 60000);\n}\ncandidateLocal.setUTCSeconds(0, 0);\n\nlet dayOpen = localDayOpen(candidateLocal, openMin);\nif (candidateLocal < dayOpen) candidateLocal = dayOpen;\n\nconst alternatives = [];\nlet guard = 0;\nwhile (alternatives.length < 3 && guard < 500) {\n  guard++;\n  const dClose = localDayClose(candidateLocal, closeMin);\n  if (candidateLocal.getTime() + duration * 60000 > dClose.getTime()) {\n    const nextDay = new Date(candidateLocal.getTime());\n    nextDay.setUTCDate(nextDay.getUTCDate() + 1);\n    candidateLocal = localDayOpen(nextDay, openMin);\n    continue;\n  }\n  const slotStartUtc = fromLocalShifted(candidateLocal, tz);\n  const slotEndUtc = new Date(slotStartUtc.getTime() + duration * 60000);\n  const busy = bookings.some((b) => slotStartUtc < b.end && slotEndUtc > b.start);\n  if (!busy) {\n    alternatives.push({ start: slotStartUtc.toISOString(), end: slotEndUtc.toISOString() });\n  }\n  candidateLocal = new Date(candidateLocal.getTime() + 30 * 60000);\n}\n\nreturn [{\n  json: {\n    status: 'conflict',\n    reason: !withinHours ? 'outside_business_hours' : 'overlaps_existing_booking',\n    alternatives,\n    dry_run: dryRun,\n    dispatched: false,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "955dea0b-ff4f-4375-a8a4-b39c4b50d1d3",
+      "name": "Create Real Event? (confirmed, not dry_run)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "confirmed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.dry_run }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7e9e8885-865c-4d9d-996f-f86f8a8b1e20",
+      "name": "Create Calendar Event (real)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.GOOGLE_CALENDAR_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"summary\": $('Validate & Decide').item.json.confirmation_text, \"start\": { \"dateTime\": $('Validate & Decide').item.json.slot.start }, \"end\": { \"dateTime\": $('Validate & Decide').item.json.slot.end } } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "ea668cc9-494a-4cb2-a8ac-f0ff97c4b675",
+      "name": "Finalize Dispatched",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "\nconst base = $('Validate & Decide').item.json;\nreturn [{\n  json: {\n    ...base,\n    dispatched: true,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "51110fe7-a2f2-4dfc-b0cf-99f10277f0b9",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Booking Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Decide": {
+      "main": [
+        [
+          {
+            "node": "Create Real Event? (confirmed, not dry_run)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Real Event? (confirmed, not dry_run)": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event (real)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event (real)": {
+      "main": [
+        [
+          {
+            "node": "Finalize Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Dispatched": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

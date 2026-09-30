@@ -1,0 +1,9 @@
+{
+  "dry_run": true,
+  "phone": "",
+  "service": "consultation",
+  "requested_start": "not-a-date",
+  "duration_min": -15,
+  "existing_bookings": [],
+  "business_hours": {"open": "09:00"}
+}

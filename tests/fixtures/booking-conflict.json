@@ -1,0 +1,12 @@
+{
+  "dry_run": true,
+  "name": "Morgan Lane",
+  "phone": "+15551110001",
+  "service": "consultation",
+  "requested_start": "2026-10-05T10:00:00Z",
+  "duration_min": 30,
+  "existing_bookings": [
+    {"id": "bk-existing", "start": "2026-10-05T10:00:00Z", "end": "2026-10-05T11:00:00Z"}
+  ],
+  "business_hours": {"open": "09:00", "close": "17:00", "tz_offset_min": 0}
+}
