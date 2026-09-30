@@ -8,7 +8,7 @@ before you trust it. It is the appointment-booking template from Weio's
 released here in full under the MIT license, with its test fixtures and the
 same Docker-based dry-run harness the pack uses.
 
-Tested with n8n 2.40.7 (`n8nio/n8n:latest`, pulled 2026-09). The workflow has not
+Tested with n8n 2.41.4 (`n8nio/n8n:latest`, pulled 2026-09-30): last full run 2026-09-30, 4 fixtures, 10 assertions, all passing via `tests/run.sh`. The workflow has not
 been deployed for a real customer; it is sample work exercised against a local,
 disposable n8n container with `dry_run: true` fixtures. See "Known limitations".
 
@@ -79,7 +79,7 @@ docker restart n8n                                   # webhook registration
                                                      # takes effect after restart
 ```
 
-`n8n import:workflow --activeState=fromJson` is refused by n8n 2.40.7 outside
+`n8n import:workflow --activeState=fromJson` is refused by n8n 2.40.x and 2.41.x outside
 queue/multi-main mode, so activation goes through `publish:workflow` plus a
 restart. `n8n update:workflow --active=true` is deprecated in this version.
 
