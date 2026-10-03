@@ -1,3 +1,5 @@
+[![Dry-run workflow acceptance](https://github.com/weioai/n8n-appointment-booking/actions/workflows/dry-run.yml/badge.svg)](https://github.com/weioai/n8n-appointment-booking/actions/workflows/dry-run.yml)
+
 # n8n appointment-booking workflow (free sample, dry-run tested)
 
 One importable [n8n](https://n8n.io) workflow that turns a booking request into a
