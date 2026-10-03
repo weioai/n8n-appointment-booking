@@ -1,0 +1,19 @@
+name: Dry-run workflow acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Import and exercise safe fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import the workflow and run its dry-run fixtures
+        run: bash tests/run.sh
